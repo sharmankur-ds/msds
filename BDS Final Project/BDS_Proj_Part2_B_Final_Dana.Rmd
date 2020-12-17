@@ -1,0 +1,536 @@
+---
+title: "BDS Project Part 2"
+author: "Ankur Sharma, Edith Castro Bravo, Dana Nguyen"
+date: "November 15, 2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+## Part A
+
+The SFO team have three (3) specific questions they want you to investigate.
+
+### Data Preprocessing
+
+```{r, message=F, results='hide'}
+library(tidyverse)
+```
+
+
+Load in the data and select the appropriate variables
+
+```{r}
+df = read.table("SFO_survey_withText.txt", header = T) %>% dplyr::select(Q17, Q18, Q19, starts_with("Q6"), Q7_text_All)
+colnames(df)[1:3] = c("age", "gender", "income")
+summary(df)
+```
+
+
+Since some of the maximum values means "unspecified" or "not applicable", we replace them with NA.
+
+```{r}
+df1 = df %>% mutate_at(vars(-gender),~ifelse(.x == max(., na.rm = T), NA, .x))
+summary(df1)
+```
+
+Examine the correlation between the survey questions. The graph below shows that the responses for the survey questions are highly positively correlated with each other. 
+
+```{r}
+library(ggcorrplot)
+```
+
+```{r}
+df1 %>% dplyr::select(starts_with("Q6")) %>% na.omit() %>% cor() %>% ggcorrplot()
+```
+Examine the correlation between age, gender, income.
+
+We see that there is some positive correlation between income and age. 
+
+```{r}
+df1 %>% dplyr::select(1:3) %>% na.omit() %>% cor() %>% ggcorrplot()
+```
+
+### Question 1
+
+Customers were asked to rate their opinion of the "SFO Airport as a whole" on a scale from 1 ("unacceptable") to 5 ("outstanding"). The executives want to know if there are patterns across the satisfied or dissatisfied customers based on demographic characteristics, such as sex, age group, and income level.
+
+```{r, message=F, results='hide'}
+library(poLCA)
+```
+
+
+```{r}
+df_sub1 = df1 %>% 
+  dplyr::select(1:3, Q6N) %>%
+  mutate_all(as.factor)
+
+summary(df_sub1)
+```
+
+```{r}
+# Distribution of Age ignoring NA
+df_sub1 %>% dplyr::select(age) %>% filter(!is.na(age)) %>% 
+  ggplot(., aes(x=age)) +
+    geom_bar() +
+    labs(title = 'Distribution of Age', x ='Age Range') +
+    theme(axis.text.x = element_text(size = 2)) +
+    scale_x_discrete(labels = c('Under 18', '18 – 24', '25 – 34', 
+                              '35 – 44','45 – 54','55 – 64',
+                              '65 and over')) +
+    theme_minimal()
+```
+
+```{r}
+# Distribution of Income ignoring NA
+df_sub1 %>% dplyr::select(income) %>% filter(!is.na(income)) %>% 
+  ggplot(., aes(x=income)) +
+  geom_bar() +
+  labs(title = 'Distribution of Income', x='Income Range') +
+  scale_x_discrete(labels = c('Under $50,000','$50,000-$100,000',
+                              '$100,001-$150,000','Over $150,000')) +
+  theme_minimal()
+
+```
+
+
+```{r}
+# Distribution of gender ignoring NA
+df_sub1 %>% 
+  filter(!is.na(gender)) %>% 
+  ggplot(., aes(x='', fill=gender)) +
+  geom_bar(width=1) +
+  ggtitle(label = "Distribution of Gender") +
+  scale_fill_discrete(name = "Gender", labels = c("Male", "Female")) +
+  coord_polar(theta = 'y', start = 0) +
+  theme_void()
+```
+
+
+```{r, fig.height= 5, fig.width=14}
+# Distribution of Age ignoring NA
+df_sub1 %>% dplyr::select(age, Q6N) %>% filter(!is.na(age), !is.na(Q6N)) %>% 
+  ggplot(., aes(x=age)) +
+    geom_bar(postion='dodge') +
+    labs(title = 'Distribution of Age by Rating', x ='Age Range') +
+    theme(axis.text.x = element_text(size = 0.1)) +
+    scale_x_discrete(labels = c('Under 18', '18 – 24', '25 – 34', 
+                              '35 – 44','45 – 54','55 – 64',
+                              '65 and over')) +
+    facet_wrap(~Q6N) +
+    theme_minimal()
+
+```
+
+
+```{r,fig.height= 4, fig.width=8}
+# Distribution of gender ignoring NA
+df_sub1 %>% dplyr::select(gender, Q6N) %>% 
+  filter(!is.na(gender), !is.na(Q6N)) %>% 
+  ggplot(., aes(x=gender, fill=gender)) +
+  geom_bar(position = "dodge") +
+  scale_x_discrete(labels = c("Male", "Female")) +
+  scale_fill_discrete(labels = c("Male", "Female"))+
+  facet_wrap(~Q6N)+
+  labs(title = 'Distribution of Gender by Rating', x ='') +
+  theme_minimal()
+```
+```{r,fig.height= 5, fig.width=15}
+# Distribution of Income ignoring NA
+df_sub1 %>% dplyr::select(income, Q6N) %>% filter(!is.na(income), !is.na(Q6N)) %>% 
+  ggplot(., aes(x=income)) +
+  geom_bar() +
+  labs(title = 'Distribution of Income by Ratings', x='Income Range') +
+  scale_x_discrete(labels = c('Under $50,000','$50,000-$100,000',
+                              '$100,001-$150,000','Over $150,000')) +
+  facet_wrap(~Q6N)+
+  theme_minimal()
+
+```
+
+```{r}
+set.seed(100)
+
+lcaformula = cbind(age, gender, income, Q6N) ~ 1
+
+class_list = c(2:5)
+
+lca_mod_list = lapply(class_list, function(x){
+  mod = poLCA(lcaformula, df_sub1, nclass=x, maxiter = 10000, tol=1e-6, verbose = F)
+  return(mod)
+})
+
+names(lca_mod_list) = c("lca2", "lca3", "lca4", "lca5")
+```
+
+Print out the plot for the classes. 
+
+```{r}
+for (i in lca_mod_list) {
+  plot(i)
+}
+```
+
+
+```{r}
+rbind(class2 = c(lca_mod_list$lca2$aic, lca_mod_list$lca2$bic),
+      class3 = c(lca_mod_list$lca3$aic, lca_mod_list$lca3$bic),
+      class4 = c(lca_mod_list$lca4$aic, lca_mod_list$lca4$bic),
+      class5 = c(lca_mod_list$lca5$aic, lca_mod_list$lca5$bic))
+```
+
+#### Conclusion 
+
+The results above show that as number of classes increase, the AIC decreases while BIC increases. We should go with BIC and choose the lowest BIC model, which is 2-class model. 
+
+From the 2-class model, 1 group has mostly people older than 34 with higher income and give more lower rating (more rating of 2 and fewer of 4), while the other group has mostly people younger than 34 with lower income and give more higher rating (fewer rating of 2 and more rating or 4). Gender is split even between the 2 groups. Since we have an even number of both gender in the data, we can conclude that gender is not a factor affecting the satisfaction outcome. 
+
+### Question 2
+
+The executives also want to know if customer satisfaction can be broken down into different attributes of the airport. Knowing this will help the team target specific strengths or areas of improvement. The central feature the customer satisfaction survey is a 14-question portion of the survey asking customers to rate satisfaction with different aspects of the airport (see Question 6 in the data directory). The executives want you to perform a quantitative analysis to determine if there are broad themes that emerge from this part of the survey.
+
+```{r, message=F, results='hide'}
+library(psych)
+```
+
+#### Determine number of factors
+
+The nfactors results suggest a 5-factor model. The parallel test suggests a 4-factor model. The scree plot suggests a 2-factor model.
+
+```{r}
+# Subsetting the survey questions only minus the "SFO as a whole" question
+df_sub2 = df1 %>% 
+  dplyr::select(starts_with('Q6'), -Q6N)
+
+# Check the number of factor
+df_sub2 %>% nfactors(.)
+```
+
+```{r}
+df_sub2 %>% fa.parallel(., fa='fa', n.iter = 100)
+```
+
+```{r}
+df_sub2 %>% scree(., pc=F)
+```
+#### Examine the loadings for the 2, 3, 4, and 5-factor models
+
+Since the variables are correlated, but we will assume that this correlation is not important and use 'varimax' for rotation. 
+
+```{r}
+fac_mod_list = lapply(c(2:5), function(x){
+  fa_mod = fa(df_sub2, nfactors = x, rotate = 'promax')
+  return(fa_mod)
+})
+
+names(fac_mod_list) = c("fa_2", "fa_3", "fa_4", "fa_5")
+```
+
+```{r}
+#Print out the loadings for each factor model
+for (i in fac_mod_list) {
+  print(i$loadings)
+}
+```
+
+```{r}
+for (i in fac_mod_list){
+  print(fa.diagram(i))
+}
+```
+
+
+There is a significant increase in cumulative variability explained from 2-factor to 3-factor models. However, there's not much an increase from 3-factor to 4-factor or 5-factor models. Therefore, 3-factor model is the optimal. 
+
+#### Conclusion
+
+Based on the results, we can split the questions into 3 groups:
+
+##### MR1 - Signage and Information Score
+
+6D - Signs and directions inside SFO
+
+6E - Escalators/elevators/moving walkways
+
+6F - Information on screens/
+
+6G - Information booths (lower level near baggage claim)
+
+6H - Information booths (upper level – departure area)
+
+##### MR2 - Transportation in and out of airport Score
+
+6I - Signs and directions on SFO airport roadways
+
+6J - Airport parking facilities
+
+6K - AirTrain
+
+6L - Long term parking lot shuttle
+
+6M - Airport rental car center
+
+###### MR3 - Entertainment Score
+
+6A - Artwork and exhibitions
+
+6B - Restaurants
+
+6C - Retail shops and concessions
+
+### Question 3
+
+Free-response comments, either positive or negative, were collected in addition to the 14-item quantitative survey. The executives are not quite sure how to examine it without going through individual surveys one by one, but they want you to see if there are any concepts or insights that arise from these responses. Do the free responses relate to the findings in 1) or 2) at all?
+
+## Part B
+
+### Develop and Investigate Your Own Research Question
+
+The SFO executives feel that additional insights can be gained from the customer satisfaction survey dataset. Based on your prior EDA deliverable and the topics we have discussed in class, develop an additional research question and execute a plan to evaluate it with these data using a method we covered this semester. Provide an appropriate explanation of your method of choice and how it applies to your question. If formal hypotheses are tested, clearly explain the results of these tests. If the method is more descriptive or data-driven, define how the results are evaluated, and provide sufficient output and data visuals to communicate the outcome. You don’t need to fish for a “significant” finding here; even null or unexpected results can be useful if the hypothesis is reasonable.
+
+#### Hypothesis: Examine whether age, gender, income plays an effect in the satisfaction rating of the three factors. 
+
+#### Add the factor scores to the data
+
+```{r}
+df2 = df1 %>% 
+  mutate_at(vars(age, gender, income), as.factor) %>% 
+  mutate(info_score = fac_mod_list$fa_3$scores[,"MR1"],
+         transport_score = fac_mod_list$fa_3$scores[,"MR2"],
+         entertain_score = fac_mod_list$fa_3$scores[,"MR3"])
+
+summary(df2)
+```
+
+
+#### Examine the relationship between the scores and overall satisfaction
+
+We see that the scores are highly correlated. 
+```{r}
+df2 %>% dplyr::select(contains("score")) %>% na.omit() %>% cor() %>% ggcorrplot()
+```
+
+
+#### Examine the linear relationship of the scores on the overall satisfaction of SFO passengers (Q6N)
+
+Linear relationship between individual predictor
+
+```{r}
+predictors = colnames(df2)[19:21]
+```
+
+
+Create linear models between the overall satisfaction with each score
+
+```{r}
+model_list = lapply(predictors, function(x){
+    # Create model
+    model = lm(as.formula(paste("Q6N ~ ", x)) , data=df2)
+    return (model)
+  })
+
+names(model_list) = c("info_mod", "trans_mod", "entertain_mod")
+```
+
+
+Overall satisfaction with info_score
+```{r}
+summary(model_list$info_mod)
+```
+
+Overall satisfaction with transport_score
+
+```{r}
+summary(model_list$trans_mod)
+```
+
+Overall satisfaction with entertain_score
+```{r}
+summary(model_list$entertain_mod)
+```
+
+Linear relationship with all predictors
+
+```{r}
+mod_full = lm(Q6N ~ info_score +transport_score+ entertain_score, data = df2 )
+
+summary(mod_full)
+```
+
+Test model utility
+```{r}
+for (i in model_list) {
+  print(anova(i, mod_full))
+}
+
+```
+
+Here we see that the Adjusted R-squared increased quite a lot with more predictors although these predictors are highly correlated. All the predictors are also significant. In addition, we the F-test of model utility shows that we should use all 3 predictors (p-values<0.05). 
+
+However, the linear model algorithm deleted much of the data. Next we look at the mixed models effects from age, gender and income groups
+
+#### Examine the mixed model effects from age, gender and income groups on the overall satisfaction of SFO passengers (Q6N)
+
+```{r}
+library(lme4)
+library(MuMIn)
+```
+
+
+```{r}
+lmer_age = lmer(Q6N ~ info_score+ transport_score+entertain_score +(1|age), data = df2)
+
+summary(lmer_age)
+
+```
+
+```{r}
+lmer_fm = lmer(Q6N ~ info_score+ transport_score+entertain_score +(1|gender), data = df2)
+
+summary(lmer_fm)
+
+```
+
+```{r}
+lmer_income = lmer(Q6N ~ info_score+ transport_score+entertain_score +(1|income), data = df2)
+
+summary(lmer_income)
+```
+
+
+Based on the results above, we can try to explore the random effect of income on models. 
+Since there are many missing values, we can try imputation methods to see if we can get a better model. 
+
+
+#### Imputation of missing values using MICE
+
+```{r}
+library(mice)
+```
+Base Imputed Model
+
+```{r}
+baseInfo = mice(df2, maxit=0)
+baseInfo$method
+```
+
+```{r}
+preds = baseInfo$predictorMatrix
+preds[,c('Q7_text_All')]=0
+preds
+```
+
+We will use all of the variables as predictors
+
+```{r}
+# ini_micemod = mice(df2, m=5, maxit = 20,
+#                    method = baseInfo$method,
+#                    predictorMatrix = preds,
+#                    print = F,
+#                    seed = 1000)
+# ini_micemod
+# save(ini_micemod, file="ini_micemod_pro.RData")
+```
+
+The plot looks good but there are some variables that did not reach the point of convergence yet. Longer iteration might help us see this clearer.  
+
+```{r}
+load("ini_micemod_pro.RData")
+plot(ini_micemod)
+```
+
+Change method to "cart" for all variables and see if this improves the predictions. 
+
+```{r}
+# cart_method = rep('cart', 20)
+# 
+# cart_micemod = mice(df2, m =5, maxit = 20,
+#                     method = cart_method,
+#                     predictorMatrix = preds,
+#                     print = F,
+#                     seed=1000)
+# cart_micemod
+# save(cart_micemod, file="cart_micemod_pro.RData")
+```
+
+```{r}
+load("cart_micemod_pro.RData")
+plot(cart_micemod)
+```
+
+Change method to "pmm" for all variables and see if this improves the predictions.
+
+```{r}
+# pmm_method = rep("pmm",20)
+# 
+# pmm_micemod = mice(df2, m=5, maxit = 20,
+#                    method=pmm_method,
+#                    predictorMatrix = preds,
+#                    print=F,
+#                    seed=1000)
+# 
+# pmm_micemod
+# save(pmm_micemod, file="pmm_micemod_pro.RData")
+```
+
+```{r}
+load("pmm_micemod_pro.RData")
+plot(pmm_micemod)
+```
+
+Since the "cart" seems to give the best results in terms of convergence, we should use this method. 
+
+Check the complete imputed dataset from the "cart" method
+
+```{r}
+complete(cart_micemod, action = 'long') %>% summary() 
+```
+
+#### Linear regression analysis on the imputed dataset 
+
+The results below show that since we accounted for the missing values, the standard errors decrease. 
+
+
+LM model with all 3 scores as predictors. 
+
+```{r}
+fit_lm_full = with(data = cart_micemod,
+                  exp = lm(Q6N ~ info_score + transport_score + entertain_score)
+                  )
+pool_lm_full = pool(fit_lm_full)
+summary(pool_lm_full)
+```
+
+#### Mixed-model analysis on the imputed dataset
+
+```{r}
+# income as random intercept
+lmer_mod_1 = with(data = cart_micemod,
+                  exp = lmer(Q6N ~ info_score + transport_score + entertain_score + (1|income))
+                )
+
+pool_mod_1 = pool(lmer_mod_1)
+summary(pool_mod_1)
+```
+
+
+```{r}
+# entertain_score as random slope and income as random intercept
+lmer_mod_2 = with(data = cart_micemod,
+                  exp = lmer(Q6N ~ info_score + transport_score + entertain_score+ (1+ entertain_score|income))
+                )
+
+pool_mod_2 = pool(lmer_mod_2)
+summary(pool_mod_2)
+```
+
+
+
+
+
+
